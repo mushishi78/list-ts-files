@@ -15,7 +15,6 @@ executable list-ts-files
       base >=4.12 && <4.13
     , streamly
     , mtl
-    , regex-applicative
 
   ghc-options:
     -O2

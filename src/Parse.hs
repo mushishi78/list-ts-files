@@ -2,10 +2,11 @@
 
 module Parse (findImports) where
 
-import           Data.Char              (isSpace)
-import           Data.Function          ((&))
-import           Data.Maybe             (fromMaybe, mapMaybe)
-import           Text.Regex.Applicative
+import           Control.Applicative          ((<|>))
+import           Data.Char                    (isSpace)
+import           Data.Function                ((&))
+import           Data.Maybe                   (fromMaybe, mapMaybe)
+import           Text.ParserCombinators.ReadP
 
 data Lexeme
     = SingleLineComment String
@@ -17,41 +18,30 @@ data Lexeme
 singleQuote = '\''
 doubleQuote = '"'
 
-manyNot :: Char -> RE Char String
-manyNot ch = many $ psym (/= ch)
-
-singleLineComment :: RE Char Lexeme
-singleLineComment = do
+singleLineComment :: ReadP Lexeme
+singleLineComment = SingleLineComment <$> do
     string "//"
-    comment <- manyNot '\n'
-    return $ SingleLineComment comment
+    munch (/= '\n')
 
-multiLineComment :: RE Char Lexeme
-multiLineComment = do
+multiLineComment :: ReadP Lexeme
+multiLineComment = MultiLineComment <$> do
     string "/*"
-    comment <- few anySym <* string "*/"
-    return $ MultiLineComment comment
+    manyTill get (string "*/")
 
-importSideEffect :: RE Char Lexeme
-importSideEffect = do
+importSideEffect :: ReadP Lexeme
+importSideEffect = ImportSideEffect <$> do
     string "import"
-    someWhitespace
-    module_ <- bracket singleQuote <|> bracket doubleQuote
-    return $ ImportSideEffect module_
+    munch1 isSpace
+    bracket singleQuote <|> bracket doubleQuote
 
-bracket :: Char -> RE Char String
-bracket ch = sym ch *> manyNot ch <* sym ch
+bracket :: Char -> ReadP String
+bracket ch = between (char ch) (char ch) (munch (/= ch))
 
-someWhitespace :: RE Char String
-someWhitespace = some $ psym isSpace
+other :: ReadP Lexeme
+other = Other <$> get
 
-other :: RE Char Lexeme
-other = do
-    anySym
-    return Other
-
-lexeme :: RE Char [Lexeme]
-lexeme = many $ (singleLineComment <|> multiLineComment <|> importSideEffect <|> other)
+lexeme :: ReadP [Lexeme]
+lexeme = many $ (singleLineComment <++ multiLineComment <++ importSideEffect <++ other)
 
 extractImport :: Lexeme -> Maybe String
 extractImport (ImportSideEffect i) = Just i
@@ -59,7 +49,10 @@ extractImport _                    = Nothing
 
 findImports :: String -> [String]
 findImports contents =
-      contents =~ lexeme
+      readP_to_S lexeme contents
+    & maybeLast -- Because ReadP isn't greedy we have to go find the greediest parsing ourselves
+    & fmap fst
     & fromMaybe []
     & mapMaybe extractImport
-
+  where
+    maybeLast ls = if length ls == 0 then Nothing else Just (last ls)
