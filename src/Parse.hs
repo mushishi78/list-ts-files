@@ -12,6 +12,7 @@ data Lexeme
     = SingleLineComment String
     | MultiLineComment String
     | ImportSideEffect String
+    | StringLiteral String
     | Other
     deriving Show
 
@@ -19,29 +20,28 @@ singleQuote = '\''
 doubleQuote = '"'
 
 singleLineComment :: ReadP Lexeme
-singleLineComment = SingleLineComment <$> do
-    string "//"
-    munch (/= '\n')
+singleLineComment = SingleLineComment <$> do string "//"; munch (/= '\n')
 
 multiLineComment :: ReadP Lexeme
-multiLineComment = MultiLineComment <$> do
-    string "/*"
-    manyTill get (string "*/")
+multiLineComment = MultiLineComment <$> do string "/*"; manyTill get (string "*/")
 
 importSideEffect :: ReadP Lexeme
 importSideEffect = ImportSideEffect <$> do
     string "import"
     munch1 isSpace
-    bracket singleQuote <|> bracket doubleQuote
+    stringLiteral
+
+stringLiteral :: ReadP String
+stringLiteral = bracket singleQuote <|> bracket doubleQuote
 
 bracket :: Char -> ReadP String
 bracket ch = between (char ch) (char ch) (munch (/= ch))
 
 other :: ReadP Lexeme
-other = Other <$> get
+other = get *> return Other
 
 lexeme :: ReadP [Lexeme]
-lexeme = many $ (singleLineComment <++ multiLineComment <++ importSideEffect <++ other)
+lexeme = many $ (singleLineComment <++ multiLineComment <++ importSideEffect <++ (StringLiteral <$> stringLiteral) <++ other)
 
 extractImport :: Lexeme -> Maybe String
 extractImport (ImportSideEffect i) = Just i
