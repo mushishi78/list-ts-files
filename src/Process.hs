@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Process (process) where
 
 import           Control.Arrow    ((>>>))

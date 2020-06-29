@@ -1,5 +1,3 @@
-{-# LANGUAGE ApplicativeDo #-}
-
 module Parse (findImports) where
 
 import           Control.Applicative          ((<|>))
