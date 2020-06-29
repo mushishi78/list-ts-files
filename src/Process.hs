@@ -40,7 +40,7 @@ emptyState = State
     }
 
 getInitialState :: FilePath -> State
-getInitialState entry = emptyState { allFiles = Set.singleton entry }
+getInitialState entry = emptyState { allFiles = Set.singleton (normalise entry) }
 
 getUnreadFiles :: State -> [FilePath]
 getUnreadFiles (State all read _ _) = Set.difference all read & Set.toList
@@ -96,9 +96,7 @@ uniquePaths (_, previousState) state =
 
 process :: FilePath -> Serial String
 process entry =
-  entry
-    & normalise
-    & getInitialState
+  getInitialState entry
     & pure
     & S.iterateM iteration
     & S.takeWhile (not . hasCompleted)
