@@ -10,7 +10,7 @@ extra-source-files:  CHANGELOG.md
 executable list-ts-files
   main-is:             Main.hs
   hs-source-dirs: src
-  other-modules: Parse
+  other-modules: Parse, Process
   build-depends:
       base >=4.12 && <4.13
     , streamly
