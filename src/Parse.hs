@@ -26,10 +26,7 @@ multiLineComment :: ReadP Lexeme
 multiLineComment = MultiLineComment <$> do string "/*"; manyTill get (string "*/")
 
 importSideEffect :: ReadP Lexeme
-importSideEffect = ImportSideEffect <$> do
-    string "import"
-    munch1 isSpace
-    stringLiteral
+importSideEffect = ImportSideEffect <$> do string "import"; munch1 isSpace; stringLiteral
 
 stringLiteral :: ReadP String
 stringLiteral = bracket singleQuote <|> bracket doubleQuote

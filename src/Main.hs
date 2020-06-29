@@ -24,7 +24,7 @@ import           System.IO                  (IOMode (..), openFile, stdout)
 
 
 data State = State
-    { allfiles         :: Set FilePath
+    { allFiles         :: Set FilePath
     , readFiles        :: Set FilePath
     , externalPackages :: Set String
     , hasCompleted     :: Bool
@@ -42,13 +42,16 @@ instance Show State where
             >>> fmap ((++) "\n    ")
             >>> intercalate ""
 
-getInitialState :: FilePath -> State
-getInitialState entry = State
-    { allfiles = Set.singleton entry
+emptyState :: State
+emptyState = State
+    { allFiles = Set.empty
     , readFiles = Set.empty
     , externalPackages = Set.empty
     , hasCompleted = False
     }
+
+getInitialState :: FilePath -> State
+getInitialState entry = emptyState { allFiles = Set.singleton entry }
 
 getUnreadFiles :: State -> [FilePath]
 getUnreadFiles (State all read _ _) = Set.difference all read & Set.toList
@@ -56,7 +59,7 @@ getUnreadFiles (State all read _ _) = Set.difference all read & Set.toList
 insertImports :: FilePath -> [FilePath] -> State -> State
 insertImports filePath imports state = state
     { readFiles = Set.insert filePath (readFiles state)
-    , allfiles = foldr Set.insert (allfiles state) relativeImports
+    , allFiles = foldr Set.insert (allFiles state) relativeImports
     , externalPackages = foldr Set.insert (externalPackages state) absoluteImports
     }
   where
@@ -69,29 +72,53 @@ insertImports filePath imports state = state
       & fmap (combine directory)
       & fmap normalise
 
+readImports :: State -> FilePath -> IO State
+readImports state filePath = do
+    contents <- readFile filePath
+    let imports = findImports contents
+    return $ insertImports filePath imports state
+
+mergeState :: State -> State -> State
+mergeState a b = State
+    { allFiles = Set.union (allFiles a) (allFiles b)
+    , readFiles = Set.union (readFiles a) (readFiles b)
+    , externalPackages = Set.union (externalPackages a) (externalPackages b)
+    , hasCompleted = (hasCompleted a) || (hasCompleted b)
+    }
+
 iteration :: State -> IO State
 iteration state =
     case getUnreadFiles state of
         [] -> return (state { hasCompleted = True })
 
-        (filePath:_) -> do
-            contents <- readFile filePath
-            let imports = findImports contents
-            return $ insertImports filePath imports state
+        unreadFiles ->
+              S.fromList unreadFiles
+            & S.mapM (readImports state)
+            & asyncly
+            & S.foldr mergeState state
+
+uniquePaths :: (Set String, State) -> State -> (Set String, State)
+uniquePaths (_, previousState) state =
+    ( Set.union newLocalFiles newPackages, state )
+
+  where
+    newLocalFiles = Set.difference (allFiles state) (allFiles previousState)
+    newPackages = Set.difference (externalPackages state) (externalPackages previousState)
 
 main :: IO ()
 main = do
     args <- getArgs
     let entry = normalise $ head args
+    let initialState = getInitialState entry
 
-    result <- getInitialState entry
+    getInitialState entry
         & pure
         & S.iterateM iteration
         & S.takeWhile (not . hasCompleted)
-        & serially
-        & S.last
+        & asyncly
+        & S.scanl' uniquePaths (Set.empty, emptyState)
+        & fmap (Set.toList . fst)
+        & S.concatMap (S.fromList)
+        & S.mapM_ putStrLn
 
-    case result of
-        Nothing    -> pure ()
-        Just state -> putStrLn $ show state
 
