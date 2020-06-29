@@ -13,7 +13,7 @@ import           Control.Monad.Identity
 import           Data.Char                  (ord)
 import           Data.Function              ((&))
 import           Data.List                  (find, intercalate, isPrefixOf)
-import           Data.Maybe                 (fromMaybe)
+import           Data.Maybe                 (fromMaybe, isJust)
 import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
 import           Parse                      (findImports)
@@ -22,14 +22,16 @@ import           System.Environment         (getArgs)
 import           System.FilePath
 import           System.IO                  (IOMode (..), openFile, stdout)
 
+
 data State = State
     { allfiles         :: Set FilePath
     , readFiles        :: Set FilePath
     , externalPackages :: Set String
+    , hasCompleted     :: Bool
     }
 
 instance Show State where
-    show (State all read packages) = intercalate "\n"
+    show (State all read packages _) = "\n" ++ intercalate "\n"
         [ "all: " ++ showSet all
         , "read: " ++ showSet read
         , "packages: " ++ showSet packages
@@ -40,32 +42,22 @@ instance Show State where
             >>> fmap ((++) "\n    ")
             >>> intercalate ""
 
-initialState :: FilePath -> State
-initialState entry = State
+getInitialState :: FilePath -> State
+getInitialState entry = State
     { allfiles = Set.singleton entry
     , readFiles = Set.empty
     , externalPackages = Set.empty
+    , hasCompleted = False
     }
 
-isRead :: State -> FilePath -> Bool
-isRead state filePath = Set.member filePath (readFiles state)
-
 getUnreadFiles :: State -> [FilePath]
-getUnreadFiles state =
-      allfiles state
-    & Set.toList
-    & filter (not . (isRead state))
-
-parseFile :: String -> IO [FilePath]
-parseFile filePath =
-      readFile filePath
-    & fmap findImports
+getUnreadFiles (State all read _ _) = Set.difference all read & Set.toList
 
 insertImports :: FilePath -> [FilePath] -> State -> State
-insertImports filePath imports s = State
-    { readFiles = Set.insert filePath (readFiles s)
-    , allfiles = foldr Set.insert (allfiles s) relativeImports
-    , externalPackages = foldr Set.insert (externalPackages s) absoluteImports
+insertImports filePath imports state = state
+    { readFiles = Set.insert filePath (readFiles state)
+    , allfiles = foldr Set.insert (allfiles state) relativeImports
+    , externalPackages = foldr Set.insert (externalPackages state) absoluteImports
     }
   where
     directory = takeDirectory filePath
@@ -77,20 +69,29 @@ insertImports filePath imports s = State
       & fmap (combine directory)
       & fmap normalise
 
-recurse' :: State -> IO State
-recurse' state =
+iteration :: State -> IO State
+iteration state =
     case getUnreadFiles state of
-        [] -> return state
+        [] -> return (state { hasCompleted = True })
 
         (filePath:_) -> do
-            imports <- parseFile filePath
-            let newState = insertImports filePath imports state
-            recurse' newState
-
+            contents <- readFile filePath
+            let imports = findImports contents
+            return $ insertImports filePath imports state
 
 main :: IO ()
 main = do
     args <- getArgs
     let entry = normalise $ head args
-    newState <- recurse' (initialState entry)
-    putStrLn (show newState)
+
+    result <- getInitialState entry
+        & pure
+        & S.iterateM iteration
+        & S.takeWhile (not . hasCompleted)
+        & serially
+        & S.last
+
+    case result of
+        Nothing    -> pure ()
+        Just state -> putStrLn $ show state
+
